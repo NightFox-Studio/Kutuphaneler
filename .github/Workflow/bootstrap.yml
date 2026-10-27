@@ -1,1 +1,65 @@
+name: Vulpes bootstrap derle (deneysel)
 
+on:
+  workflow_dispatch:
+    inputs:
+      extra:
+        description: "Ek paketler (virgülle)"
+        default: "python,python-pip,git,openssl,curl"
+
+permissions:
+  contents: write
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    steps:
+      - name: Disk alanı aç
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL || true
+          df -h /
+
+      - name: termux-packages indir
+        run: git clone --depth 1 https://github.com/termux/termux-packages.git
+
+      - name: Paket adını com.nightfox.vulpes yap
+        working-directory: termux-packages
+        run: |
+          grep -n 'TERMUX_APP__PACKAGE_NAME=' scripts/properties.sh
+          sed -i 's/^TERMUX_APP__PACKAGE_NAME=.*/TERMUX_APP__PACKAGE_NAME="com.nightfox.vulpes"/' scripts/properties.sh
+          grep -n 'TERMUX_APP__PACKAGE_NAME=' scripts/properties.sh
+
+      - name: Temizle
+        working-directory: termux-packages
+        run: ./scripts/run-docker.sh ./clean.sh
+
+      - name: Bootstrap derle (saatler sürebilir)
+        working-directory: termux-packages
+        run: |
+          set +e
+          ./scripts/run-docker.sh ./scripts/build-bootstraps.sh --architectures aarch64 --add "${{ inputs.extra }}" &> build.log
+          code=$?
+          tail -n 150 build.log
+          exit $code
+
+      - name: Çıktıları listele
+        if: always()
+        run: ls -la termux-packages/*.zip termux-packages/build.log || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bootstrap-ve-log
+          path: |
+            termux-packages/bootstrap-*.zip
+            termux-packages/build.log
+
+      - name: Sürüm olarak yayınla
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "bootstrap-${{ github.run_number }}" termux-packages/bootstrap-aarch64.zip \
+            --repo "${{ github.repository }}" \
+            --title "Bootstrap aarch64 #${{ github.run_number }}" \
+            --notes "com.nightfox.vulpes için derlendi. Paketler: ${{ inputs.extra }}"
